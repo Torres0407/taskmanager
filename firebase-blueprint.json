@@ -1,0 +1,160 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account data including level, experience points, and status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "points": { "type": "number", "description": "Current spendable currency balance." },
+        "xp": { "type": "number", "description": "Total lifetime experience points." },
+        "level": { "type": "number" },
+        "rank": { "type": "string", "enum": ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Legendary"] },
+        "streak": { "type": "number" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "isAdmin": { "type": "boolean" }
+      },
+      "required": ["uid", "email", "points", "xp", "level", "rank", "streak"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A user-defined goal or task.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "overdue"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "recurrence": { "type": "string", "enum": ["none", "daily", "weekly"] },
+        "pointsValue": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "priority", "status", "dueDate"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A log of point changes.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["earn", "penalty", "purchase"] },
+        "reason": { "type": "string" },
+        "relatedId": { "type": "string", "description": "ID of the task, achievement, or store item." },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "type", "reason", "createdAt"]
+    },
+    "Achievement": {
+      "title": "Achievement",
+      "description": "Definition of a badge or achievement.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "pointsBonus": { "type": "number" },
+        "xpBonus": { "type": "number" }
+      },
+      "required": ["title", "description", "icon"]
+    },
+    "UserAchievement": {
+      "title": "User Achievement",
+      "description": "Record of a user unlocking an achievement.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "achievementId": { "type": "string" },
+        "unlockedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "achievementId", "unlockedAt"]
+    },
+    "StoreItem": {
+      "title": "Store Item",
+      "description": "An item available for purchase with points.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "cost": { "type": "number" },
+        "type": { "type": "string", "enum": ["cosmetic", "feature_unlock"] },
+        "available": { "type": "boolean" }
+      },
+      "required": ["title", "description", "cost", "type", "available"]
+    },
+    "Config": {
+      "title": "Game Configuration",
+      "description": "Global settings for game logic.",
+      "type": "object",
+      "properties": {
+        "pointsPerLowTask": { "type": "number" },
+        "pointsPerMedTask": { "type": "number" },
+        "pointsPerHighTask": { "type": "number" },
+        "penaltyPerMissedTask": { "type": "number" },
+        "streakMultipliers": { "type": "object" },
+        "xpCurveCoefficient": { "type": "number" }
+      }
+    },
+    "LeaderboardEntry": {
+      "title": "Leaderboard Entry",
+      "description": "Aggregated user data for the leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "xp": { "type": "number" },
+        "rank": { "type": "string" },
+        "level": { "type": "number" },
+        "points": { "type": "number" }
+      },
+      "required": ["userId", "xp", "rank", "level"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile and progression data."
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Stores individual tasks for all users."
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Stores all point transactions for auditing and history."
+    },
+    "/achievements/{achievementId}": {
+      "schema": "Achievement",
+      "description": "Definitions of available achievements."
+    },
+    "/userAchievements/{id}": {
+      "schema": "UserAchievement",
+      "description": "Links users to achievements they have earned."
+    },
+    "/storeItems/{itemId}": {
+      "schema": "StoreItem",
+      "description": "Items available for users to purchase with points."
+    },
+    "/config/{configId}": {
+      "schema": "Config",
+      "description": "Global game configuration documents."
+    },
+    "/leaderboard/{userId}": {
+      "schema": "LeaderboardEntry",
+      "description": "Cached data for building global rankings."
+    }
+  }
+}

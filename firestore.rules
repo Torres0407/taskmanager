@@ -1,0 +1,172 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'torresokubor07@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isServerTimestamp(field) {
+      return incoming()[field] == request.time;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid
+        && data.email == request.auth.token.email
+        && data.points is number && data.points >= 0
+        && data.xp is number && data.xp >= 0
+        && data.level is number && data.level >= 0
+        && data.streak is number && data.streak >= 0
+        && data.rank in ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Legendary']
+        && (data.displayName == null || data.displayName is string)
+        && (data.photoURL == null || data.photoURL is string)
+        && (data.isAdmin is bool)
+        && isServerTimestamp('updatedAt');
+    }
+
+    function isValidTask(data) {
+      return data.userId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.priority in ['low', 'medium', 'high']
+        && data.status in ['pending', 'completed', 'overdue']
+        && (data.pointsValue == null || data.pointsValue is number)
+        && data.dueDate is timestamp
+        && (data.description == null || (data.description is string && data.description.size() <= 1000));
+    }
+
+    function isValidTransaction(data) {
+      return data.userId == request.auth.uid
+        && data.amount is number
+        && data.type in ['earn', 'penalty', 'purchase']
+        && data.reason is string && data.reason.size() <= 600
+        && data.createdAt == request.time;
+    }
+
+    // --- Collection Routes ---
+
+    // USERS
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isOwner(userId)
+        && isValidUser(incoming())
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('lastActivityAt')
+        && (incoming().isAdmin == false || request.auth.token.email == 'torresokubor07@gmail.com');
+
+      allow update: if isOwner(userId) && (
+        // Action: Profile Update
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']) && isValidUser(incoming()))
+      ) || isAdmin();
+    }
+
+    // TASKS
+    match /tasks/{taskId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(taskId)
+        && isValidTask(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('updatedAt')
+        && incoming().keys().size() >= 7;
+
+      allow update: if isSignedIn() && existing().userId == request.auth.uid && (
+        // Action: Edit
+        (existing().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'priority', 'dueDate', 'updatedAt']) && isValidTask(incoming()) && isServerTimestamp('updatedAt'))
+        ||
+        // Action: Complete
+        (existing().status == 'pending' && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAt', 'updatedAt']) && isServerTimestamp('completedAt') && isServerTimestamp('updatedAt'))
+      ) || isAdmin();
+
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid && existing().status != 'completed';
+    }
+
+    // TRANSACTIONS
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidTransaction(incoming()) && isValidId(transactionId);
+      allow update, delete: if false;
+    }
+
+    // ACHIEVEMENTS
+    match /achievements/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // USER ACHIEVEMENTS
+    match /userAchievements/{id} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid && isServerTimestamp('unlockedAt');
+      allow update, delete: if false;
+    }
+
+    // CONFIG
+    match /config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // LEADERBOARD
+    match /leaderboard/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // STORE ITEMS
+    match /storeItems/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ADMINS
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // TEST CONNECTION
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

@@ -1,0 +1,164 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      // Logic for admin lookup - usually a specific collection or claim.
+      // For bootstrapping, we check a dedicated admins collection.
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isServerTimestamp(field) {
+      return incoming()[field] == request.time;
+    }
+
+    // 2. Validation Blueprints
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid
+        && data.email == request.auth.token.email
+        && data.points is number && data.points >= 0
+        && data.xp is number && data.xp >= 0
+        && data.level is number && data.level >= 0
+        && data.streak is number && data.streak >= 0
+        && data.rank in ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Legendary']
+        && (data.keys().hasAll(['uid', 'email', 'points', 'xp', 'level', 'rank', 'streak', 'createdAt', 'updatedAt']) 
+            && data.keys().size() >= 9);
+    }
+
+    function isValidTask(data) {
+      return data.userId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.priority in ['low', 'medium', 'high']
+        && data.status in ['pending', 'completed', 'overdue']
+        && data.pointsValue is number
+        && data.dueDate is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.userId == request.auth.uid
+        && data.amount is number
+        && data.type in ['earn', 'penalty', 'purchase']
+        && data.reason is string && data.reason.size() <= 500
+        && data.createdAt == request.time;
+    }
+
+    // --- Collections ---
+
+    // USERS
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin(); // Users shouldn't be listable by anyone but admins
+
+      allow create: if isOwner(userId) 
+        && isValidUser(incoming())
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('updatedAt')
+        && incoming().isAdmin == false; // Users cannot self-promote
+
+      allow update: if isOwner(userId) && (
+        // Action: Profile Update (Display Name/Photo)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']) && isServerTimestamp('updatedAt'))
+        // Action: Progression (Points/XP/Level/Streak/Rank) - In a real app, these should be Cloud Functions ONLY
+        // But for this phase, we'll allow controlled updates if necessary, OR strictly forbid client-side writes to these fields.
+        // HARDENING: We forbid client-side updates to points/xp to prevent cheating.
+      ) || isAdmin();
+    }
+
+    // TASKS
+    match /tasks/{taskId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(taskId)
+        && isValidTask(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('updatedAt');
+
+      allow update: if isSignedIn() && existing().userId == request.auth.uid && (
+        // Action: Edit details
+        (existing().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'priority', 'dueDate', 'updatedAt']) && isServerTimestamp('updatedAt'))
+        ||
+        // Action: Complete Task (Terminal State)
+        (existing().status == 'pending' && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAt', 'updatedAt']) && isServerTimestamp('completedAt') && isServerTimestamp('updatedAt'))
+      ) || isAdmin();
+
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid && existing().status != 'completed';
+    }
+
+    // TRANSACTIONS
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Transactions are usually system-generated, but if client writes:
+      allow create: if isSignedIn() && isValidTransaction(incoming());
+      allow update, delete: if false; // Immutable
+    }
+
+    // CONFIG (Read-only for users)
+    match /config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ACHIEVEMENTS
+    match /achievements/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // USER ACHIEVEMENTS
+    match /userAchievements/{id} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // LEADERBOARD
+    match /leaderboard/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin(); // Updated by system
+    }
+
+    // STORE ITEMS
+    match /storeItems/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // BOOTSTRAP ADMINS
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Strictly manual or internal
+    }
+  }
+}
